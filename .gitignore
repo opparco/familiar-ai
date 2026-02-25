@@ -12,3 +12,6 @@ __pycache__/
 
 # Data
 ~/.familiar_ai/
+
+# External projects
+external/

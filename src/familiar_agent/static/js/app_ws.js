@@ -4,12 +4,12 @@
 import { ChatManager } from './chat_ws.js';
 import { AnimationManager } from './animation.js';
 import { SoundManager } from './sound.js';
-import { Settings } from './settings.js';
+import { createSettings } from './settings.js';
 
 // DOM読み込み完了後に初期化
 document.addEventListener('DOMContentLoaded', () => {
     // 設定の初期化
-    const settings = new Settings(appConfig);
+    const settings = createSettings(appConfig);
     
     // サウンドマネージャーの初期化
     const soundManager = new SoundManager(settings);

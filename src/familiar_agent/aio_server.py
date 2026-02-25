@@ -1,4 +1,4 @@
-"""Lightweight aiohttp server with WebSocket support (replaces Flask+SocketIO)."""
+"""Lightweight aiohttp server with WebSocket support."""
 
 from __future__ import annotations
 
@@ -88,29 +88,28 @@ class FamiliarServer:
     async def index_handler(self, request: web.Request) -> web.Response:
         """Serve the main HTML page."""
         try:
-            config = {
-                "avatar_name": self.agent.config.agent_name,
-                "avatar_full_name": self.agent.config.agent_name,
-                "companion_name": self.agent.config.companion_name,
-                "typewriter_delay": 30,
-                "beep_frequency": 800,
-                "beep_duration": 30,
-                "beep_volume": 0.05,
-                "beep_volume_end": 0.01,
-            }
-            
             html = (TEMPLATES_DIR / "index.html").read_text(encoding="utf-8")
-            
-            # Simple template substitution
-            for key, value in config.items():
-                placeholder = f"{{{{ config.{key} }}}}"
-                json_value = json.dumps(value)
-                html = html.replace(placeholder, json_value)
-            
-            # Remove any remaining Jinja2 syntax (default filters, etc.)
-            import re
-            html = re.sub(r'\{\{.*?\|\s*\w+\s*\}\}', '', html)
-            
+
+            # Values for plain HTML parts
+            avatar_full_name = self.agent.config.agent_name
+            avatar_name_upper = avatar_full_name.upper()
+
+            # Values for JavaScript config object
+            app_config = {
+                "typewriterDelay": 30,
+                "avatarName": self.agent.config.agent_name,
+                "companionName": self.agent.config.companion_name or "USER",
+                "beepFrequency": 800,
+                "beepDuration": 30,
+                "beepVolume": 0.05,
+                "beepVolumeEnd": 0.01,
+            }
+
+            # Simple placeholder substitution
+            html = html.replace("{{ avatar_full_name }}", avatar_full_name)
+            html = html.replace("{{ avatar_name_upper }}", avatar_name_upper)
+            html = html.replace("{{ app_config_json }}", json.dumps(app_config))
+
             return web.Response(text=html, content_type="text/html")
         except Exception as e:
             logger.error(f"Error serving index: {e}")
