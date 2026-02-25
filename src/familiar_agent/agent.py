@@ -197,10 +197,12 @@ class EmbodiedAgent:
             )
 
         tts = self.config.tts
-        if tts.elevenlabs_api_key:
-            self._tts = TTSTool(
-                tts.elevenlabs_api_key, tts.voice_id, tts.go2rtc_url, tts.go2rtc_stream
-            )
+        if tts.engine == "voicevox":
+            # VOICEVOX: local engine, no API key needed
+            self._tts = TTSTool(tts)
+        elif tts.elevenlabs_api_key:
+            # ElevenLabs: requires API key
+            self._tts = TTSTool(tts)
 
     @property
     def _all_tool_defs(self) -> list[dict]:

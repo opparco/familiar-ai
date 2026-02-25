@@ -51,12 +51,26 @@ class MobilityConfig:
 
 @dataclass
 class TTSConfig:
+    # TTS engine selection: "elevenlabs" | "voicevox"
+    engine: str = field(default_factory=lambda: os.environ.get("TTS_ENGINE", "elevenlabs"))
+
+    # ElevenLabs settings
     elevenlabs_api_key: str = field(
         default_factory=lambda: os.environ.get("ELEVENLABS_API_KEY", "")
     )
     voice_id: str = field(
         default_factory=lambda: os.environ.get("ELEVENLABS_VOICE_ID", "cgSgspJ2msm6clMCkdW9")
     )
+
+    # VOICEVOX settings (local HTTP API)
+    voicevox_url: str = field(
+        default_factory=lambda: os.environ.get("VOICEVOX_URL", "http://localhost:50021")
+    )
+    voicevox_speaker: int = field(
+        default_factory=lambda: int(os.environ.get("VOICEVOX_SPEAKER", "3"))
+    )
+
+    # Audio output settings (shared)
     go2rtc_url: str = field(
         default_factory=lambda: os.environ.get("GO2RTC_URL", "http://localhost:1984")
     )
