@@ -1,0 +1,53 @@
+<!-- AIチャットインターフェース：ターミナル風UIでAIアシスタントと対話 -->
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ config.avatar_full_name }}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- ターミナル風UI -->
+    <div class="terminal">
+        <div class="chat-area">
+            <div class="chat-container">
+                <!-- チャット出力エリア -->
+                <div class="output" id="output">
+                    <div class="line system">&gt; SYSTEM: {{ config.avatar_full_name }} Online</div>
+                </div>
+                
+                <!-- アバター表示エリア -->
+                <div class="avatar-area">
+                    <img id="avatar-img" src="/static/character-images/open_close.png" alt="{{ config.avatar_name|upper }}">
+                    <div class="avatar-label">{{ config.avatar_name|upper }}</div>
+                </div>
+            </div>
+            
+            <!-- 入力エリア -->
+            <div class="input-line">
+                <span class="prompt">&gt;</span>
+                <input type="text" id="input" autofocus>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 設定値をJavaScript変数に格納
+        const appConfig = {
+            typewriterDelay: {{ config.typewriter_delay | tojson }},
+            avatarName: {{ config.avatar_name | tojson }},
+            companionName: {{ config.companion_name | default('USER') | tojson }},
+            beepFrequency: {{ config.beep_frequency | tojson }},
+            beepDuration: {{ config.beep_duration | tojson }},
+            beepVolume: {{ config.beep_volume | tojson }},
+            beepVolumeEnd: {{ config.beep_volume_end | tojson }}
+        };
+    </script>
+    
+    <!-- Socket.IO クライアント -->
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+    <!-- モジュールを読み込み -->
+    <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

@@ -21,14 +21,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Debug log file for detailed troubleshooting
-_DEBUG_LOG = Path("debug.log")
+# Debug log file for detailed troubleshooting (same location as chat.log)
+_DEBUG_LOG = Path.home() / ".cache" / "familiar-ai" / "debug.log"
 
 
 def _debug_log(msg: str) -> None:
     """Write debug message to debug.log with timestamp."""
     timestamp = datetime.now().isoformat()
     try:
+        _DEBUG_LOG.parent.mkdir(parents=True, exist_ok=True)
         with open(_DEBUG_LOG, "a", encoding="utf-8") as f:
             f.write(f"[{timestamp}] {msg}\n")
     except Exception:

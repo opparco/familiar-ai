@@ -204,12 +204,19 @@ async def _handle_user(
 def main() -> None:
     debug = "--debug" in sys.argv
     use_tui = "--no-tui" not in sys.argv
+    use_web = "--web" in sys.argv
 
     config = AgentConfig()
     if not config.api_key:
         print("Error: API_KEY not set.")
         print("  Set PLATFORM=gemini|anthropic|openai and API_KEY=<your key>.")
         sys.exit(1)
+
+    # Web UI mode
+    if use_web:
+        from .web_app import run_web_server
+        run_web_server(host="0.0.0.0", port=5000, debug=debug)
+        return
 
     agent = EmbodiedAgent(config)
     desires = DesireSystem()
