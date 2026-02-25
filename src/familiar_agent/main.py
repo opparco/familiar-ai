@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import sys
+import threading
 import time
 
 from .agent import EmbodiedAgent
@@ -212,10 +213,10 @@ def main() -> None:
         print("  Set PLATFORM=gemini|anthropic|openai and API_KEY=<your key>.")
         sys.exit(1)
 
-    # Web UI mode
+    # Web UI mode (aiohttp + native WebSocket)
     if use_web:
-        from .web_app import run_web_server
-        run_web_server(host="0.0.0.0", port=5000, debug=debug)
+        from .aio_server import run_aio_server
+        run_aio_server(host="0.0.0.0", port=5000, debug=debug)
         return
 
     agent = EmbodiedAgent(config)

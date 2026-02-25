@@ -1,5 +1,5 @@
 /**
- * チャット機能モジュール (SocketIO版)
+ * チャット機能モジュール (生WebSocket版)
  * メッセージの送受信とUI更新を管理
  */
 export class ChatManager {
@@ -8,69 +8,97 @@ export class ChatManager {
         this.animationManager = animationManager;
         this.output = document.getElementById('output');
         this.input = document.getElementById('input');
-        this.socket = null;
+        this.ws = null;
+        this.reconnectInterval = 5000;
         this.currentAiLine = null;
         this.isProcessing = false;
 
-        this.initSocket();
+        this.initWebSocket();
         this.initEventListeners();
     }
 
-    // SocketIO接続初期化
-    initSocket() {
-        this.socket = io();
+    // WebSocket接続初期化
+    initWebSocket() {
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-        this.socket.on('connect', () => {
-            console.log('Connected to server');
-        });
+        console.log(`Connecting to WebSocket: ${wsUrl}`);
+        this.ws = new WebSocket(wsUrl);
 
-        this.socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-        });
+        this.ws.onopen = () => {
+            console.log('WebSocket connected');
+            this.addLine('Connected to server', 'system');
+        };
 
-        // ユーザーメッセージ表示（サーバーからブロードキャスト）
-        this.socket.on('user_message', (data) => {
-            this.addLine(data.message, 'user');
-        });
+        this.ws.onclose = () => {
+            console.log('WebSocket disconnected');
+            this.addLine('Disconnected from server', 'system');
+            // Reconnect after delay
+            setTimeout(() => this.initWebSocket(), this.reconnectInterval);
+        };
 
-        // AIのテキストチャンクをリアルタイム表示
-        this.socket.on('text_chunk', (data) => {
-            if (!this.currentAiLine) {
-                this.startAiLine();
-            }
-            this.appendToAiLine(data.chunk);
-            // タイプライター音を再生（チャンクごと）
-            this.animationManager.playBeep();
-        });
+        this.ws.onerror = (error) => {
+            console.error('WebSocket error:', error);
+            this.addLine('Connection error', 'system');
+        };
 
-        // ツール実行表示
-        this.socket.on('action', (data) => {
-            this.addActionLine(data);
-        });
+        this.ws.onmessage = (event) => {
+            this.handleMessage(JSON.parse(event.data));
+        };
+    }
 
-        // レスポンス完了
-        this.socket.on('response_complete', (data) => {
-            this.isProcessing = false;
-            this.currentAiLine = null;
-            this.input.disabled = false;
-            this.input.focus();
-            this.animationManager.stopTalking();
-        });
+    // メッセージハンドリング
+    handleMessage(data) {
+        switch (data.type) {
+            case 'connected':
+                console.log('Connected:', data.data);
+                break;
 
-        // エラー
-        this.socket.on('error', (data) => {
-            this.addLine(`ERROR: ${data.message}`, 'system');
-            this.isProcessing = false;
-            this.currentAiLine = null;
-            this.input.disabled = false;
-            this.input.focus();
-            this.animationManager.stopTalking();
-        });
+            case 'user_message':
+                this.addLine(data.data.message, 'user');
+                break;
 
-        // 履歴クリア
-        this.socket.on('history_cleared', () => {
-            this.output.innerHTML = '<div class="line system">&gt; SYSTEM: History cleared</div>';
-        });
+            case 'text_chunk':
+                if (!this.currentAiLine) {
+                    this.startAiLine();
+                }
+                this.appendToAiLine(data.data.chunk);
+                // タイプライター音を再生（チャンクごと）
+                this.animationManager.playBeep();
+                break;
+
+            case 'action':
+                this.addActionLine(data.data);
+                break;
+
+            case 'response_complete':
+                this.isProcessing = false;
+                this.currentAiLine = null;
+                this.input.disabled = false;
+                this.input.focus();
+                this.animationManager.stopTalking();
+                break;
+
+            case 'error':
+                this.addLine(`ERROR: ${data.data.message}`, 'system');
+                this.isProcessing = false;
+                this.currentAiLine = null;
+                this.input.disabled = false;
+                this.input.focus();
+                this.animationManager.stopTalking();
+                break;
+
+            case 'history_cleared':
+                this.output.innerHTML = '<div class="line system">&gt; SYSTEM: History cleared</div>';
+                break;
+
+            case 'status':
+                console.log('Status:', data.data.message);
+                break;
+
+            default:
+                console.log('Unknown message type:', data.type);
+        }
     }
 
     // イベントリスナー初期化
@@ -88,14 +116,14 @@ export class ChatManager {
             if (e.key === 'Enter' && this.input.value.trim() === '/clear') {
                 e.preventDefault();
                 this.input.value = '';
-                this.socket.emit('clear_history');
+                this.sendCommand('clear_history');
             }
         });
     }
 
     // メッセージ送信
     async sendMessage(message) {
-        if (this.isProcessing) return;
+        if (this.isProcessing || this.ws.readyState !== WebSocket.OPEN) return;
 
         this.isProcessing = true;
         this.input.disabled = true;
@@ -103,8 +131,21 @@ export class ChatManager {
         // アバターを話している状態に
         this.animationManager.startTalking();
 
-        // SocketIOで送信
-        this.socket.emit('chat', { message });
+        // WebSocketで送信
+        this.ws.send(JSON.stringify({
+            type: 'chat',
+            data: { message }
+        }));
+    }
+
+    // コマンド送信
+    sendCommand(command) {
+        if (this.ws.readyState !== WebSocket.OPEN) return;
+
+        this.ws.send(JSON.stringify({
+            type: command,
+            data: null
+        }));
     }
 
     // AIレスポンス行を開始

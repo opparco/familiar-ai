@@ -36,7 +36,7 @@
         // 設定値をJavaScript変数に格納
         const appConfig = {
             typewriterDelay: {{ config.typewriter_delay | tojson }},
-            avatarName: {{ config.avatar_name | tojson }},
+            avatarName: {{ config.agent_name | tojson }},
             companionName: {{ config.companion_name | default('USER') | tojson }},
             beepFrequency: {{ config.beep_frequency | tojson }},
             beepDuration: {{ config.beep_duration | tojson }},
@@ -45,9 +45,7 @@
         };
     </script>
     
-    <!-- Socket.IO クライアント -->
-    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
-    <!-- モジュールを読み込み -->
-    <script type="module" src="/static/js/app.js"></script>
+    <!-- モジュールを読み込み（WebSocket版） -->
+    <script type="module" src="/static/js/app_ws.js"></script>
 </body>
 </html>
