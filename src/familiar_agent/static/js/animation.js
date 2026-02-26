@@ -78,9 +78,8 @@ class JapanesePhonemeAnalyzer {
 }
 
 export class AnimationManager {
-    constructor(settings, soundManager) {
+    constructor(settings) {
         this.settings = settings;
-        this.soundManager = soundManager;
         this.avatarImg = document.getElementById('avatar-img');
         this.output = document.getElementById('output');
         
@@ -223,11 +222,6 @@ export class AnimationManager {
                 element.textContent += text[charIndex];
                 this.output.scrollTop = this.output.scrollHeight;
                 
-                // 音を鳴らす（空白・改行以外）
-                if (text[charIndex] !== ' ' && text[charIndex] !== '\n') {
-                    this.soundManager.playTypeSound();
-                }
-                
                 // 口パク制御
                 const shouldOpen = this.phonemeAnalyzer.shouldOpenMouth(phoneme.type);
                 this.updateCharacterImage(this.currentEyesOpen, shouldOpen);
@@ -286,20 +280,6 @@ export class AnimationManager {
     stopTalking() {
         this.isTalking = false;
         this.updateCharacterImage(true, false); // 目開き、口閉じ
-    }
-
-    /**
-     * タイプ音を再生（チャンクごとに呼ばれる）
-     */
-    playBeep() {
-        if (!this.isTalking) {
-            this.startTalking();
-        }
-        // 簡易的な口パク（ランダムで口を開閉）
-        const shouldOpen = Math.random() > 0.3;
-        this.updateCharacterImage(this.currentEyesOpen, shouldOpen);
-        // 音を鳴らす
-        this.soundManager.playTypeSound();
     }
 
     /**

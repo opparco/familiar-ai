@@ -61,10 +61,9 @@ export class ChatManager {
             case 'text_chunk':
                 if (!this.currentAiLine) {
                     this.startAiLine();
+                    this.animationManager.startTalking();
                 }
                 this.appendToAiLine(data.data.chunk);
-                // タイプライター音を再生（チャンクごと）
-                this.animationManager.playBeep();
                 break;
 
             case 'action':

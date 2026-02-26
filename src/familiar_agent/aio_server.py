@@ -99,10 +99,6 @@ class FamiliarServer:
                 "typewriterDelay": 30,
                 "avatarName": self.agent.config.agent_name,
                 "companionName": self.agent.config.companion_name or "USER",
-                "beepFrequency": 800,
-                "beepDuration": 30,
-                "beepVolume": 0.05,
-                "beepVolumeEnd": 0.01,
             }
 
             # Simple placeholder substitution
