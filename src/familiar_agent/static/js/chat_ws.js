@@ -1,5 +1,5 @@
 /**
- * チャット機能モジュール (生WebSocket版)
+ * チャット機能モジュール (WebSocket版)
  * メッセージの送受信とUI更新を管理
  */
 export class ChatManager {

@@ -1,5 +1,5 @@
 /**
- * メインアプリケーションモジュール (生WebSocket版)
+ * メインアプリケーションモジュール (WebSocket版)
  */
 import { ChatManager } from './chat_ws.js';
 import { AnimationManager } from './animation.js';
@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // アニメーションマネージャーの初期化
     const animationManager = new AnimationManager(settings, soundManager);
     
-    // チャットマネージャーの初期化（生WebSocket版）
+    // チャットマネージャーの初期化（WebSocket版）
     const chatManager = new ChatManager(settings, animationManager);
     
     console.log('Familiar AI Client initialized (WebSocket)');
