@@ -36,6 +36,8 @@ class FamiliarCLI:
         # Signals that the current agent response is finished
         self._response_done = asyncio.Event()
         self._streaming = False  # True while agent text is streaming
+        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._quit = False
 
     # ------------------------------------------------------------------
     # Receive loop
@@ -46,7 +48,7 @@ class FamiliarCLI:
             async for raw in ws:
                 self._handle_message(json.loads(raw))
         except ConnectionClosed:
-            print(f"\n{_DIM}[server closed the connection]{_RESET}")
+            print(f"\n{_DIM}[connection lost]{_RESET}")
             self._response_done.set()
 
     def _handle_message(self, msg: dict) -> None:
@@ -95,10 +97,10 @@ class FamiliarCLI:
             pass
 
     # ------------------------------------------------------------------
-    # Input loop
+    # Input loop  (runs for the lifetime of the process)
     # ------------------------------------------------------------------
 
-    async def _input_loop(self, ws: websockets.WebSocketClientProtocol) -> None:
+    async def _input_loop(self) -> None:
         prompt = f"{_YELLOW}{self.companion_name}>{_RESET} "
         print(
             f"{_DIM}Type a message and press Enter. /clear — clear history, /quit — exit.{_RESET}\n"
@@ -107,6 +109,7 @@ class FamiliarCLI:
             try:
                 line: str = await aioconsole.ainput(prompt)
             except EOFError:
+                self._quit = True
                 break
 
             line = line.strip()
@@ -114,11 +117,24 @@ class FamiliarCLI:
                 continue
 
             if line in ("/quit", "/exit", "/q"):
+                self._quit = True
                 break
+
+            # Wait until a connection is available
+            if self._ws is None:
+                print(f"{_DIM}[not connected — waiting for reconnect…]{_RESET}")
+                while self._ws is None and not self._quit:
+                    await asyncio.sleep(0.5)
+                if self._quit:
+                    break
 
             if line == "/clear":
                 self._response_done.clear()
-                await ws.send(json.dumps({"type": "clear_history", "data": None}))
+                try:
+                    await self._ws.send(json.dumps({"type": "clear_history", "data": None}))
+                except ConnectionClosed:
+                    self._response_done.set()
+                    continue
                 await self._response_done.wait()
                 continue
 
@@ -128,32 +144,68 @@ class FamiliarCLI:
 
             # Regular chat message
             self._response_done.clear()
-            await ws.send(json.dumps({"type": "chat", "data": {"message": line}}))
+            try:
+                await self._ws.send(json.dumps({"type": "chat", "data": {"message": line}}))
+            except ConnectionClosed:
+                print(f"{_DIM}[send failed — reconnecting…]{_RESET}")
+                self._response_done.set()
+                continue
             await self._response_done.wait()
 
     # ------------------------------------------------------------------
-    # Entry point
+    # Entry point  (reconnect loop)
     # ------------------------------------------------------------------
 
     async def run(self) -> None:
-        print(f"Connecting to {self.url} …")
-        try:
-            async with websockets.connect(self.url, ping_interval=30) as ws:
-                recv_task = asyncio.create_task(self._receive_loop(ws))
-                input_task = asyncio.create_task(self._input_loop(ws))
-                _done, pending = await asyncio.wait(
-                    [recv_task, input_task],
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-                for t in pending:
-                    t.cancel()
+        reconnect_delay = 1.0
+        max_delay = 30.0
+
+        input_task = asyncio.create_task(self._input_loop())
+
+        while not self._quit:
+            print(f"Connecting to {self.url} …")
+            try:
+                async with websockets.connect(self.url, ping_interval=30) as ws:
+                    self._ws = ws
+                    self._streaming = False
+                    reconnect_delay = 1.0  # reset backoff on successful connect
+
+                    recv_task = asyncio.create_task(self._receive_loop(ws))
+                    done, _ = await asyncio.wait(
+                        [recv_task, input_task],
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    recv_task.cancel()
                     try:
-                        await t
+                        await recv_task
                     except asyncio.CancelledError:
                         pass
-        except (ConnectionRefusedError, OSError) as e:
-            print(f"{_RED}Could not connect: {e}{_RESET}")
-            sys.exit(1)
+
+                    if input_task in done:
+                        break  # user quit
+
+                    # Server disconnected — fall through to reconnect
+            except (ConnectionRefusedError, OSError) as e:
+                print(f"{_RED}Could not connect: {e}{_RESET}")
+
+            self._ws = None
+            self._response_done.set()  # unblock input loop if waiting on a response
+
+            if self._quit:
+                break
+
+            print(f"{_DIM}[reconnecting in {reconnect_delay:.0f}s…]{_RESET}")
+            try:
+                await asyncio.sleep(reconnect_delay)
+            except asyncio.CancelledError:
+                break
+            reconnect_delay = min(reconnect_delay * 2, max_delay)
+
+        input_task.cancel()
+        try:
+            await input_task
+        except asyncio.CancelledError:
+            pass
 
         print(f"\n{_DIM}[disconnected]{_RESET}")
 

@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from aiohttp import web, WSMsgType
+from aiohttp.client_exceptions import ClientConnectionResetError
 
 from .agent import EmbodiedAgent
 from .config import AgentConfig
@@ -130,21 +131,24 @@ class FamiliarServer:
                 {"status": "ok", "agent_name": self.agent.config.agent_name},
             )
 
-            async for msg in ws:
-                if msg.type == WSMsgType.TEXT:
-                    try:
-                        data = json.loads(msg.data)
-                        msg_type = data.get("type", "")
-                        msg_data = data.get("data")
-                        await self._handle_message(ws, msg_type, msg_data)
-                    except json.JSONDecodeError:
-                        logger.warning(f"Invalid JSON: {msg.data}")
-                        await self._send_error(ws, "Invalid JSON")
-                    except Exception as e:
-                        logger.error(f"Error handling message: {e}")
-                        await self._send_error(ws, str(e))
-                elif msg.type == WSMsgType.ERROR:
-                    logger.error(f"WebSocket error: {ws.exception()}")
+            try:
+                async for msg in ws:
+                    if msg.type == WSMsgType.TEXT:
+                        try:
+                            data = json.loads(msg.data)
+                            msg_type = data.get("type", "")
+                            msg_data = data.get("data")
+                            await self._handle_message(ws, msg_type, msg_data)
+                        except json.JSONDecodeError:
+                            logger.warning(f"Invalid JSON: {msg.data}")
+                            await self._send_error(ws, "Invalid JSON")
+                        except Exception as e:
+                            logger.error(f"Error handling message: {e}")
+                            await self._send_error(ws, str(e))
+                    elif msg.type == WSMsgType.ERROR:
+                        logger.error(f"WebSocket error: {ws.exception()}")
+            except (ClientConnectionResetError, ConnectionResetError):
+                pass  # client disconnected abruptly while server sent ping/pong
 
         finally:
             self.clients.discard(ws)
