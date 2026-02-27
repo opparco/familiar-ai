@@ -1,10 +1,11 @@
 # familiar-ai — WebSocket fork
 
-This branch replaces the original Flask/SocketIO web server with a lightweight
-**aiohttp + native WebSocket** stack, and adds a terminal CLI client.
-It also adds **VOICEVOX** as a local TTS alternative to ElevenLabs.
+This fork adds a **web UI and CLI client** to upstream familiar-ai, which ships
+only a TUI/REPL. The web layer is built on **aiohttp + native WebSocket** for
+low-latency streaming. It also adds **VOICEVOX** as a local TTS alternative to ElevenLabs.
 
 > **Base:** `baseline-20260225` (upstream `main` as of 2026-02-25)
+> Upstream has no web server at all — everything in this fork is additive.
 
 ---
 
@@ -12,11 +13,11 @@ It also adds **VOICEVOX** as a local TTS alternative to ElevenLabs.
 
 | Area | Change |
 |------|--------|
-| Web server | Flask + Flask-SocketIO → **aiohttp + WebSocket** (`aio_server.py`) |
-| JS client | `app.js` / `chat.js` → `app_ws.js` / `chat_ws.js` (native WebSocket API) |
-| CLI client | New `familiar-client` command — terminal interface to the WebSocket server |
-| TTS | Added **VOICEVOX** engine alongside ElevenLabs (`TTS_ENGINE=voicevox`) |
-| Dependencies | Removed `flask`, `flask-socketio`, `python-socketio`; added `aiohttp`, `aioconsole` |
+| Web server | **New** — aiohttp + WebSocket server (`aio_server.py`, `--web` flag) |
+| Web UI | **New** — browser client (`static/`, `templates/`, `app_ws.js`, `chat_ws.js`) |
+| CLI client | **New** — `familiar-client` command, terminal interface to the WebSocket server |
+| TTS | **Added** VOICEVOX engine alongside ElevenLabs (`TTS_ENGINE=voicevox`) |
+| Dependencies | Added `aiohttp`, `aioconsole`; no upstream deps removed |
 
 ---
 
