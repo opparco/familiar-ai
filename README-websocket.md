@@ -14,8 +14,10 @@ low-latency streaming. It also adds **VOICEVOX** as a local TTS alternative to E
 | Area | Change |
 |------|--------|
 | Web server | **New** — aiohttp + WebSocket server (`aio_server.py`, `--web` flag) |
-| Web UI | **New** — browser client; UI design based on [avatar-ui-core](https://github.com/sito-sikino/avatar-ui-core) |
+| Web UI | **New** — browser client with typewriter effect; UI design based on [avatar-ui-core](https://github.com/sito-sikino/avatar-ui-core) |
 | CLI client | **New** — `familiar-client` command, terminal interface to the WebSocket server |
+| Desire loop | **New** — server runs a background agent loop; fires autonomous desire turns when idle |
+| Interrupt support | **New** — user messages interrupt an in-progress agent turn mid-loop |
 | TTS | **Added** VOICEVOX engine alongside ElevenLabs (`TTS_ENGINE=voicevox`) |
 | Dependencies | Added `aiohttp`, `aioconsole`; no upstream deps removed |
 
@@ -78,6 +80,9 @@ All frames are JSON.
 // Sent immediately after connection
 { "type": "connected", "data": { "status": "ok", "agent_name": "Yukine" } }
 
+// Echo of the user's chat message (broadcast to all clients)
+{ "type": "user_message", "data": { "sender": "USER", "message": "Hello!" } }
+
 // Streaming text chunk
 { "type": "text_chunk", "data": { "chunk": "Hello" } }
 
@@ -90,7 +95,7 @@ All frames are JSON.
 // History was cleared
 { "type": "history_cleared", "data": {} }
 
-// Status / info message
+// Status / info message (also used for desire murmurs and curiosity target notices)
 { "type": "status", "data": { "message": "..." } }
 
 // Error
@@ -166,6 +171,14 @@ All settings via `.env` (copy from `.env.example`).
 ### aiohttp WebSocket server (`aio_server.py`)
 
 - Single-file server; `FamiliarServer` holds agent + desire system + connected client set.
+- **Single background agent loop** (`_run_agent_loop`) runs for the lifetime of the server —
+  it processes user messages and fires desire turns. WebSocket handlers only enqueue inputs.
+- **Interrupt support**: the input queue is passed directly to `agent.run()` as
+  `interrupt_queue`, so a new user message injected while a turn is in progress is delivered
+  mid-loop as `[User interrupted]`.
+- **Desire / autonomous turns**: when the queue is empty for `IDLE_CHECK_INTERVAL` (10 s) and
+  `DESIRE_COOLDOWN` (90 s) has elapsed since the last user interaction, the dominant desire
+  fires as an autonomous turn. A murmur `status` message is broadcast first.
 - All outbound messages go through `_broadcast()` which skips already-closed sockets gracefully.
 - `ClientConnectionResetError` from abrupt client disconnect (during heartbeat ping/pong) is
   caught silently to avoid noisy error logs.
