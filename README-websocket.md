@@ -14,7 +14,7 @@ low-latency streaming. It also adds **VOICEVOX** as a local TTS alternative to E
 | Area | Change |
 |------|--------|
 | Web server | **New** — aiohttp + WebSocket server (`aio_server.py`, `--web` flag) |
-| Web UI | **New** — browser client (`static/`, `templates/`, `app_ws.js`, `chat_ws.js`); UI design based on [avatar-ui-core](https://github.com/sito-sikino/avatar-ui-core) |
+| Web UI | **New** — browser client; UI design based on [avatar-ui-core](https://github.com/sito-sikino/avatar-ui-core) |
 | CLI client | **New** — `familiar-client` command, terminal interface to the WebSocket server |
 | TTS | **Added** VOICEVOX engine alongside ElevenLabs (`TTS_ENGINE=voicevox`) |
 | Dependencies | Added `aiohttp`, `aioconsole`; no upstream deps removed |
