@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from pathlib import Path
-from typing import Callable
 
 from aiohttp import web, WSMsgType
 from aiohttp.client_exceptions import ClientConnectionResetError
@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
 TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
+DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
 
 
 def get_action_icon(name: str) -> str:
@@ -47,7 +50,7 @@ def format_action(name: str, tool_input: dict) -> str:
         return f"{name}({deg}°)"
     if name == "say":
         text = tool_input.get("text", "")[:50]
-        return f'「{text}…」'
+        return f"「{text}…」"
     if name == "walk":
         direction = tool_input.get("direction", "?")
         duration = tool_input.get("duration", "")
@@ -75,13 +78,20 @@ class FamiliarServer:
         self.port = port
         self.app = web.Application()
         self.clients: set[web.WebSocketResponse] = set()
+
+        # Shared queue: WS handler enqueues user messages;
+        # _run_agent_loop() consumes them (and passes to agent.run() as interrupt_queue).
+        self._input_queue: asyncio.Queue[str] = asyncio.Queue()
+        self._last_interaction_time: float = time.time()
+        self._agent_loop_task: asyncio.Task | None = None
+
         self._setup_routes()
 
     def _setup_routes(self) -> None:
         """Setup HTTP and WebSocket routes."""
         # Static files
         self.app.router.add_static("/static", STATIC_DIR, name="static")
-        
+
         # Routes
         self.app.router.add_get("/", self.index_handler)
         self.app.router.add_get("/ws", self.websocket_handler)
@@ -119,10 +129,10 @@ class FamiliarServer:
             autoping=True,
         )
         await ws.prepare(request)
-        
+
         self.clients.add(ws)
         logger.info(f"WebSocket client connected: {request.remote}")
-        
+
         try:
             # Send connection confirmation
             await self._send_message(
@@ -138,15 +148,38 @@ class FamiliarServer:
                             data = json.loads(msg.data)
                             msg_type = data.get("type", "")
                             msg_data = data.get("data")
-                            await self._handle_message(ws, msg_type, msg_data)
+
+                            if msg_type == "chat":
+                                user_input = (msg_data or {}).get("message", "").strip()
+                                if user_input:
+                                    # Broadcast immediately so all clients see the message
+                                    await self._broadcast(
+                                        "user_message",
+                                        {
+                                            "sender": self.agent.config.companion_name or "USER",
+                                            "message": user_input,
+                                        },
+                                    )
+                                    # Enqueue for agent loop (also acts as interrupt if busy)
+                                    await self._input_queue.put(user_input)
+                                    self._last_interaction_time = time.time()
+
+                            elif msg_type == "clear_history":
+                                await self._handle_clear_history(ws)
+
+                            else:
+                                logger.warning(f"Unknown message type: {msg_type}")
+
                         except json.JSONDecodeError:
                             logger.warning(f"Invalid JSON: {msg.data}")
                             await self._send_error(ws, "Invalid JSON")
                         except Exception as e:
                             logger.error(f"Error handling message: {e}")
                             await self._send_error(ws, str(e))
+
                     elif msg.type == WSMsgType.ERROR:
                         logger.error(f"WebSocket error: {ws.exception()}")
+
             except (ClientConnectionResetError, ConnectionResetError):
                 pass  # client disconnected abruptly while server sent ping/pong
 
@@ -156,84 +189,135 @@ class FamiliarServer:
 
         return ws
 
-    async def _handle_message(
-        self, ws: web.WebSocketResponse, msg_type: str, data: dict | None
-    ) -> None:
-        """Handle incoming WebSocket message."""
-        logger.debug(f"Received {msg_type}: {data}")
+    # ------------------------------------------------------------------
+    # Agent loop — runs as a background task for the lifetime of the server
+    # ------------------------------------------------------------------
 
-        if msg_type == "chat":
-            await self._handle_chat(ws, data)
-        elif msg_type == "clear_history":
-            await self._handle_clear_history(ws)
-        else:
-            logger.warning(f"Unknown message type: {msg_type}")
+    async def _run_agent_loop(self) -> None:
+        """Background task: consume the input queue and fire desire turns when idle."""
+        while True:
+            try:
+                user_input = await asyncio.wait_for(
+                    self._input_queue.get(), timeout=IDLE_CHECK_INTERVAL
+                )
+            except asyncio.TimeoutError:
+                user_input = None
 
-    async def _handle_chat(self, ws: web.WebSocketResponse, data: dict | None) -> None:
-        """Handle chat message."""
-        if not data:
-            await self._send_error(ws, "No data provided")
-            return
+            if user_input is not None:
+                self._last_interaction_time = time.time()
+                await self._run_user_turn(user_input)
+            else:
+                # Idle — check desire cooldown then fire if threshold reached
+                if time.time() - self._last_interaction_time < DESIRE_COOLDOWN:
+                    continue
 
-        user_input = data.get("message", "").strip()
-        if not user_input:
-            await self._send_error(ws, "Empty message")
-            return
+                prompt = self.desires.dominant_as_prompt()
+                if prompt:
+                    desire_name, _ = self.desires.get_dominant()
+                    murmur = {
+                        "look_around": _t("desire_look_around"),
+                        "explore": _t("desire_explore"),
+                        "greet_companion": _t("desire_greet_companion"),
+                        "rest": _t("desire_rest"),
+                    }.get(desire_name, _t("desire_default"))
+                    await self._broadcast("status", {"message": murmur})
 
-        # Broadcast user message to all clients
-        await self._broadcast(
-            "user_message",
-            {"sender": self.agent.config.companion_name, "message": user_input},
-        )
+                    # Check once more — a message may have arrived while we were deciding
+                    if not self._input_queue.empty():
+                        item = self._input_queue.get_nowait()
+                        self._last_interaction_time = time.time()
+                        await self._run_user_turn(item)
+                        continue
 
-        # Process with agent
+                    await self._run_desire_turn(desire_name, prompt)
+
+    async def _run_user_turn(self, user_input: str) -> None:
+        """Run one user-driven agent turn, supporting mid-turn interrupts."""
+        actions_log: list[dict] = []
+        text_buffer: list[str] = []
+
+        def on_action(name: str, tool_input: dict) -> None:
+            icon = get_action_icon(name)
+            label = format_action(name, tool_input)
+            asyncio.create_task(
+                self._broadcast(
+                    "action",
+                    {"name": name, "icon": icon, "label": label, "input": tool_input},
+                )
+            )
+            actions_log.append({"name": name, "input": tool_input})
+
+        def on_text(chunk: str) -> None:
+            text_buffer.append(chunk)
+            asyncio.create_task(self._broadcast("text_chunk", {"chunk": chunk}))
+
         try:
-            actions_log = []
-            text_buffer = []
-
-            def on_action(name: str, tool_input: dict) -> None:
-                """Callback when agent uses a tool."""
-                icon = get_action_icon(name)
-                label = format_action(name, tool_input)
-                asyncio.create_task(
-                    self._broadcast(
-                        "action",
-                        {"name": name, "icon": icon, "label": label, "input": tool_input},
-                    )
-                )
-                actions_log.append({"name": name, "input": tool_input})
-
-            def on_text(chunk: str) -> None:
-                """Callback for streaming text."""
-                text_buffer.append(chunk)
-                asyncio.create_task(
-                    self._broadcast("text_chunk", {"chunk": chunk})
-                )
-
             await self.agent.run(
                 user_input,
                 on_action=on_action,
                 on_text=on_text,
                 desires=self.desires,
+                interrupt_queue=self._input_queue,  # same queue → mid-loop interrupt
             )
-
-            # Signal completion
             await self._broadcast(
                 "response_complete",
                 {"full_text": "".join(text_buffer), "actions": actions_log},
             )
-
-            # Update desires
             if self.desires.curiosity_target:
                 await self._broadcast(
                     "status",
                     {"message": f"[気になること: {self.desires.curiosity_target}]"},
                 )
             self.desires.satisfy("greet_companion")
-
         except Exception as e:
             logger.error(f"Agent error: {e}")
-            await self._send_error(ws, str(e))
+            await self._broadcast("error", {"message": str(e)})
+
+    async def _run_desire_turn(self, desire_name: str, prompt: str) -> None:
+        """Run one autonomous desire-driven agent turn."""
+        text_buffer: list[str] = []
+
+        def on_action(name: str, tool_input: dict) -> None:
+            icon = get_action_icon(name)
+            label = format_action(name, tool_input)
+            asyncio.create_task(
+                self._broadcast(
+                    "action",
+                    {"name": name, "icon": icon, "label": label, "input": tool_input},
+                )
+            )
+
+        def on_text(chunk: str) -> None:
+            text_buffer.append(chunk)
+            asyncio.create_task(self._broadcast("text_chunk", {"chunk": chunk}))
+
+        try:
+            await self.agent.run(
+                "",
+                on_action=on_action,
+                on_text=on_text,
+                desires=self.desires,
+                inner_voice=prompt,
+                interrupt_queue=self._input_queue,  # user can interrupt desire turns too
+            )
+            await self._broadcast(
+                "response_complete",
+                {"full_text": "".join(text_buffer), "actions": []},
+            )
+            if self.desires.curiosity_target:
+                await self._broadcast(
+                    "status",
+                    {"message": f"[気になること: {self.desires.curiosity_target}]"},
+                )
+            self.desires.satisfy(desire_name)
+            self.desires.curiosity_target = None
+        except Exception as e:
+            logger.error(f"Desire turn error: {e}")
+            await self._broadcast("error", {"message": str(e)})
+
+    # ------------------------------------------------------------------
+    # Utility handlers
+    # ------------------------------------------------------------------
 
     async def _handle_clear_history(self, ws: web.WebSocketResponse) -> None:
         """Handle clear history request."""
@@ -244,9 +328,7 @@ class FamiliarServer:
             logger.error(f"Error clearing history: {e}")
             await self._send_error(ws, str(e))
 
-    async def _send_message(
-        self, ws: web.WebSocketResponse, msg_type: str, data: dict
-    ) -> None:
+    async def _send_message(self, ws: web.WebSocketResponse, msg_type: str, data: dict) -> None:
         """Send message to specific client."""
         try:
             message = json.dumps({"type": msg_type, "data": data})
@@ -293,9 +375,20 @@ class FamiliarServer:
         logger.info(f"🌐 Server started at http://{self.host}:{self.port}")
         logger.info(f"   WebSocket: ws://{self.host}:{self.port}/ws")
 
-        # Keep running
-        while True:
-            await asyncio.sleep(3600)
+        # Start the agent loop as a background task
+        self._agent_loop_task = asyncio.create_task(self._run_agent_loop())
+
+        try:
+            # Keep running until cancelled
+            while True:
+                await asyncio.sleep(3600)
+        finally:
+            if self._agent_loop_task:
+                self._agent_loop_task.cancel()
+                try:
+                    await self._agent_loop_task
+                except asyncio.CancelledError:
+                    pass
 
 
 def run_aio_server(
@@ -317,7 +410,7 @@ def run_aio_server(
     desires = DesireSystem()
 
     server = FamiliarServer(agent, desires, host, port)
-    
+
     print(f"\n🌐 Server: http://{host}:{port}")
     print(f"   WebSocket: ws://{host}:{port}/ws")
     print("   Press Ctrl+C to stop\n")
