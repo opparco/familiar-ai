@@ -13,6 +13,11 @@ export class ChatManager {
         this.currentAiLine = null;
         this.isProcessing = false;
 
+        // タイプライター用文字キュー
+        this.displayQueue = [];
+        this.isDraining = false;
+        this.charDelay = 22; // ms/char（通常速度）
+
         this.initWebSocket();
         this.initEventListeners();
     }
@@ -61,9 +66,9 @@ export class ChatManager {
             case 'text_chunk':
                 if (!this.currentAiLine) {
                     this.startAiLine();
-                    this.animationManager.startTalking();
                 }
                 this.appendToAiLine(data.data.chunk);
+                this.animationManager.processChunk(data.data.chunk);
                 break;
 
             case 'action':
@@ -71,6 +76,7 @@ export class ChatManager {
                 break;
 
             case 'response_complete':
+                this._flushDisplayQueue();
                 this.isProcessing = false;
                 this.currentAiLine = null;
                 this.input.disabled = false;
@@ -79,6 +85,7 @@ export class ChatManager {
                 break;
 
             case 'error':
+                this._flushDisplayQueue();
                 this.addLine(`ERROR: ${data.data.message}`, 'system');
                 this.isProcessing = false;
                 this.currentAiLine = null;
@@ -159,10 +166,45 @@ export class ChatManager {
 
     // AI行にテキストを追加
     appendToAiLine(text) {
-        if (this.currentAiLine) {
-            this.currentAiLine.textContent += text;
-            this.scrollToBottom();
+        if (!this.currentAiLine) return;
+        for (const char of text) {
+            this.displayQueue.push(char);
         }
+        if (!this.isDraining) {
+            this._drainDisplayQueue();
+        }
+    }
+
+    // キューから1文字ずつ表示
+    async _drainDisplayQueue() {
+        this.isDraining = true;
+        while (this.displayQueue.length > 0) {
+            const backlog = this.displayQueue.length;
+            const delay = backlog > 30 ? 0 : backlog > 15 ? 8 : this.charDelay;
+            const char = this.displayQueue.shift();
+            if (this.currentAiLine) {
+                this.currentAiLine.textContent += char;
+                this.scrollToBottom();
+            }
+            if (delay > 0) await this._sleep(delay);
+        }
+        this.isDraining = false;
+    }
+
+    // 残りキューをすべて即時フラッシュ
+    _flushDisplayQueue() {
+        while (this.displayQueue.length > 0) {
+            const char = this.displayQueue.shift();
+            if (this.currentAiLine) {
+                this.currentAiLine.textContent += char;
+            }
+        }
+        this.isDraining = false;
+        this.scrollToBottom();
+    }
+
+    _sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 
     // アクション表示行を追加

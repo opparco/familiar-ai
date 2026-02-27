@@ -90,6 +90,11 @@ export class AnimationManager {
         this.isTalking = false;
         this.currentMouthOpen = false;
         this.currentEyesOpen = true;
+
+        // ストリーミング口パクキュー
+        this.chunkQueue = [];
+        this.isAnimatingChunk = false;
+        this.chunkCharDelay = 80; // ms/char（発話速度基準）
         
         // 瞬き制御
         this.blinkInterval = null;
@@ -162,112 +167,10 @@ export class AnimationManager {
         }
     }
 
-    // ==================== 口パクアニメーション ====================
+    // ==================== WebSocket用リアルタイム制御 ====================
 
     /**
-     * 日本語音節に基づく口パクアニメーション
-     * @param {Array} phonemes - 音節情報の配列
-     * @param {number} baseDelay - 基本の文字表示遅延（ms）
-     */
-    async animateMouthByPhonemes(phonemes, baseDelay) {
-        for (let i = 0; i < phonemes.length; i++) {
-            const phoneme = phonemes[i];
-            const shouldOpen = this.phonemeAnalyzer.shouldOpenMouth(phoneme.type);
-            
-            // 口の状態を更新
-            this.updateCharacterImage(this.currentEyesOpen, shouldOpen);
-            
-            // 音節の長さに応じた待機
-            const duration = baseDelay * phoneme.duration;
-            await this.sleep(duration);
-            
-            // 口を閉じる（次の文字がすぐに来る場合は短く）
-            if (i < phonemes.length - 1 && !this.phonemeAnalyzer.shouldOpenMouth(phonemes[i + 1].type)) {
-                this.updateCharacterImage(this.currentEyesOpen, false);
-            }
-        }
-    }
-
-    // ==================== タイプライター効果 ====================
-
-    /**
-     * タイプライター効果でテキストを表示
-     * @param {HTMLElement} element - テキストを表示する要素
-     * @param {string} text - 表示するテキスト
-     * @returns {Promise<void>}
-     */
-    typeWriter(element, text) {
-        return new Promise((resolve) => {
-            this.isTalking = true;
-            
-            // 音節解析
-            const phonemes = this.phonemeAnalyzer.analyze(text);
-            
-            let charIndex = 0;
-            let phonemeIndex = 0;
-            
-            const typeNext = async () => {
-                if (charIndex >= text.length) {
-                    // 完了時
-                    this.isTalking = false;
-                    this.updateCharacterImage(true, false); // 目開き、口閉じ
-                    resolve();
-                    return;
-                }
-                
-                // 現在の音節を取得
-                const phoneme = phonemes[phonemeIndex] || { type: 'consonant', duration: 0.4 };
-                
-                // 文字を表示
-                element.textContent += text[charIndex];
-                this.output.scrollTop = this.output.scrollHeight;
-                
-                // 口パク制御
-                const shouldOpen = this.phonemeAnalyzer.shouldOpenMouth(phoneme.type);
-                this.updateCharacterImage(this.currentEyesOpen, shouldOpen);
-                
-                charIndex++;
-                phonemeIndex++;
-                
-                // 次の音節を確認
-                const nextPhoneme = phonemes[phonemeIndex];
-                if (nextPhoneme && !this.phonemeAnalyzer.shouldOpenMouth(nextPhoneme.type)) {
-                    // 次が子音や停止の場合は口を閉じる予約
-                    setTimeout(() => {
-                        if (this.isTalking) {
-                            this.updateCharacterImage(this.currentEyesOpen, false);
-                        }
-                    }, this.settings.typewriterDelay * 0.3);
-                }
-                
-                // 音節の長さに応じた遅延
-                const delay = this.settings.typewriterDelay * phoneme.duration;
-                setTimeout(typeNext, delay);
-            };
-            
-            typeNext();
-        });
-    }
-
-    /**
-     * シンプルな口パクアニメーション（後方互換性用）
-     */
-    startMouthAnimation() {
-        // 新しい実装では使用しない
-    }
-
-    /**
-     * 口パクアニメーション停止
-     */
-    stopMouthAnimation() {
-        this.isTalking = false;
-        this.updateCharacterImage(true, false);
-    }
-
-    // ==================== SocketIO用リアルタイム制御 ====================
-
-    /**
-     * 話し始め（SocketIOストリーミング開始時）
+     * 話し始め（ストリーミング開始時）
      */
     startTalking() {
         this.isTalking = true;
@@ -275,11 +178,46 @@ export class AnimationManager {
     }
 
     /**
-     * 話し終わり（SocketIOストリーミング終了時）
+     * 話し終わり（ストリーミング終了時）
      */
     stopTalking() {
         this.isTalking = false;
+        this.chunkQueue = [];
+        this.isAnimatingChunk = false;
         this.updateCharacterImage(true, false); // 目開き、口閉じ
+    }
+
+    /**
+     * ストリーミングチャンクの音節アニメーション
+     * @param {string} text - 受信チャンクテキスト
+     */
+    processChunk(text) {
+        if (!this.isTalking) return;
+        this.chunkQueue.push(text);
+        if (!this.isAnimatingChunk) {
+            this._drainChunkQueue();
+        }
+    }
+
+    /**
+     * チャンクキューを順番に処理
+     */
+    async _drainChunkQueue() {
+        this.isAnimatingChunk = true;
+        while (this.chunkQueue.length > 0 && this.isTalking) {
+            // バックログが多いほど速くする
+            const backlog = this.chunkQueue.length;
+            const speed = backlog > 3 ? 0.3 : backlog > 1 ? 0.6 : 1.0;
+            const text = this.chunkQueue.shift();
+            const phonemes = this.phonemeAnalyzer.analyze(text);
+            for (const phoneme of phonemes) {
+                if (!this.isTalking) break;
+                this.updateCharacterImage(this.currentEyesOpen,
+                    this.phonemeAnalyzer.shouldOpenMouth(phoneme.type));
+                await this.sleep(this.chunkCharDelay * phoneme.duration * speed);
+            }
+        }
+        this.isAnimatingChunk = false;
     }
 
     /**
