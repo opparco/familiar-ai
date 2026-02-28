@@ -1,17 +1,23 @@
-"""Observation and emotional memory - SQLite + multilingual-e5-small embeddings.
+"""Observation and emotional memory - SQLite + sentence-transformers embeddings.
 
 Architecture inspired by memory-mcp (Phase 11: SQLite+numpy).
 - Fast startup: no heavy DB server
-- Semantic search: multilingual-e5-small (~117MB, lazy loaded)
+- Semantic search: lazy-loaded embedding model
 - Hybrid: vector similarity + LIKE keyword fallback
 - Two memory types: observations (what I saw) + feelings (what I felt)
+
+Supported models (set via EMBEDDING_MODEL env var):
+  intfloat/multilingual-e5-small  — default, multilingual
+  cl-nagoya/ruri-v3-30m  — Japanese-optimised
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +28,7 @@ import numpy as np
 logger = logging.getLogger(__name__)
 
 DB_PATH = str(Path.home() / ".familiar_ai" / "observations.db")
-EMBEDDING_MODEL = "intfloat/multilingual-e5-small"
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "intfloat/multilingual-e5-small")
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS observations (
@@ -85,37 +91,69 @@ def _decode_vector(blob: bytes) -> np.ndarray:
     return np.frombuffer(blob, dtype=np.float32)
 
 
-# ── lazy embedding model ──────────────────────────────────────
+# ── embedding model implementations ───────────────────────────
 
 
-class _EmbeddingModel:
-    """Lazy-loaded multilingual-e5-small."""
+class MultilingualE5Model:
+    """Lazy-loaded intfloat/multilingual-e5-small."""
 
-    def __init__(self, model_name: str = EMBEDDING_MODEL):
-        self._model_name = model_name
+    MODEL_NAME = "intfloat/multilingual-e5-small"
+
+    def __init__(self) -> None:
         self._model: Any = None
 
     def _load(self) -> None:
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
-            logger.info("Loading embedding model %s...", self._model_name)
-            self._model = SentenceTransformer(self._model_name)
-            logger.info("Embedding model loaded.")
+            logger.info("Loading %s ...", self.MODEL_NAME)
+            t0 = time.perf_counter()
+            self._model = SentenceTransformer(self.MODEL_NAME)
+            logger.info("Loaded in %.2f s", time.perf_counter() - t0)
 
-    def encode_document(self, texts: list[str]) -> list[list[float]]:
+    def encode_documents(self, texts: list[str]) -> np.ndarray:
         self._load()
         prefixed = [f"passage: {t}" for t in texts]
-        return self._model.encode(
-            prefixed, normalize_embeddings=True, show_progress_bar=False
-        ).tolist()
+        return self._model.encode(prefixed, normalize_embeddings=True, show_progress_bar=False)
 
-    def encode_query(self, texts: list[str]) -> list[list[float]]:
+    def encode_queries(self, texts: list[str]) -> np.ndarray:
         self._load()
         prefixed = [f"query: {t}" for t in texts]
-        return self._model.encode(
-            prefixed, normalize_embeddings=True, show_progress_bar=False
-        ).tolist()
+        return self._model.encode(prefixed, normalize_embeddings=True, show_progress_bar=False)
+
+
+class RuriV3Model:
+    """Lazy-loaded cl-nagoya/ruri-v3-30m."""
+
+    MODEL_NAME = "cl-nagoya/ruri-v3-30m"
+
+    def __init__(self) -> None:
+        self._model: Any = None
+
+    def _load(self) -> None:
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+
+            logger.info("Loading %s ...", self.MODEL_NAME)
+            t0 = time.perf_counter()
+            self._model = SentenceTransformer(self.MODEL_NAME)
+            logger.info("Loaded in %.2f s", time.perf_counter() - t0)
+
+    def encode_documents(self, texts: list[str]) -> np.ndarray:
+        self._load()
+        prefixed = [f"検索文書: {t}" for t in texts]
+        return self._model.encode(prefixed, normalize_embeddings=True, show_progress_bar=False)
+
+    def encode_queries(self, texts: list[str]) -> np.ndarray:
+        self._load()
+        prefixed = [f"検索クエリ: {t}" for t in texts]
+        return self._model.encode(prefixed, normalize_embeddings=True, show_progress_bar=False)
+
+
+def _create_embedding_model(model_name: str = EMBEDDING_MODEL) -> MultilingualE5Model | RuriV3Model:
+    if model_name == RuriV3Model.MODEL_NAME:
+        return RuriV3Model()
+    return MultilingualE5Model()
 
 
 # ── ObservationMemory ─────────────────────────────────────────
@@ -127,7 +165,7 @@ class ObservationMemory:
     def __init__(self, db_path: str = DB_PATH, model_name: str = EMBEDDING_MODEL):
         self._db_path = db_path
         self._db: sqlite3.Connection | None = None
-        self._embedder = _EmbeddingModel(model_name)
+        self._embedder = _create_embedding_model(model_name)
 
     def _ensure_connected(self) -> sqlite3.Connection:
         if self._db is None:
@@ -180,7 +218,7 @@ class ObservationMemory:
 
             image_data = _encode_image(image_path) if image_path else None
 
-            vec = self._embedder.encode_document([content])[0]
+            vec = self._embedder.encode_documents([content])[0]
             blob = _encode_vector(vec)
 
             db.execute(
@@ -222,7 +260,7 @@ class ObservationMemory:
             count = db.execute("SELECT COUNT(*) FROM obs_embeddings").fetchone()[0]
 
             if count > 0:
-                query_vec = np.array(self._embedder.encode_query([query])[0], dtype=np.float32)
+                query_vec = np.array(self._embedder.encode_queries([query])[0], dtype=np.float32)
 
                 rows = db.execute(
                     f"SELECT o.id, o.content, o.date, o.time, o.direction, o.kind, o.emotion, e.vector "
