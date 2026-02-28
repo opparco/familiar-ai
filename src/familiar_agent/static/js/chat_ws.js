@@ -8,9 +8,14 @@ export class ChatManager {
         this.animationManager = animationManager;
         this.output = document.getElementById('output');
         this.input = document.getElementById('input');
+        this.btnSend = document.getElementById('btn-send');
+        this.btnClear = document.getElementById('btn-clear');
+        this.statusPanel = document.getElementById('status-panel');
+        this.statusText = document.getElementById('status-text');
         this.ws = null;
         this.reconnectInterval = 5000;
-        this.currentAiLine = null;
+        this.currentAiWrap = null;
+        this.currentAiText = null;
         this.isProcessing = false;
 
         // タイプライター用文字キュー
@@ -32,19 +37,18 @@ export class ChatManager {
 
         this.ws.onopen = () => {
             console.log('WebSocket connected');
-            this.addLine('Connected to server', 'system');
         };
 
         this.ws.onclose = () => {
             console.log('WebSocket disconnected');
-            this.addLine('Disconnected from server', 'system');
-            // Reconnect after delay
+            this._setStatus('Disconnected', 'disconnected');
+            this.addSystem('Disconnected from server');
             setTimeout(() => this.initWebSocket(), this.reconnectInterval);
         };
 
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
-            this.addLine('Connection error', 'system');
+            this.addSystem('Connection error');
         };
 
         this.ws.onmessage = (event) => {
@@ -55,16 +59,19 @@ export class ChatManager {
     // メッセージハンドリング
     handleMessage(data) {
         switch (data.type) {
-            case 'connected':
-                console.log('Connected:', data.data);
+            case 'connected': {
+                const agentName = data.data?.agent_name || data.data?.agentName || this.settings.avatarName || 'Agent';
+                this._setStatus(`Connected: ${agentName}`, 'connected');
+                this.addSystem(`Connected to ${agentName}`);
                 break;
+            }
 
             case 'user_message':
-                this.addLine(data.data.message, 'user');
+                this.addUser(data.data.message);
                 break;
 
             case 'text_chunk':
-                if (!this.currentAiLine) {
+                if (!this.currentAiWrap) {
                     this.startAiLine();
                 }
                 this.appendToAiLine(data.data.chunk);
@@ -72,35 +79,39 @@ export class ChatManager {
                 break;
 
             case 'action':
-                this.addActionLine(data.data);
+                this.addAction(data.data);
                 break;
 
             case 'response_complete':
                 this._flushDisplayQueue();
                 this.isProcessing = false;
-                this.currentAiLine = null;
-                this.input.disabled = false;
-                this.input.focus();
+                this.currentAiWrap = null;
+                this.currentAiText = null;
+                this._setInputEnabled(true);
                 this.animationManager.stopTalking();
                 break;
 
             case 'error':
                 this._flushDisplayQueue();
-                this.addLine(`ERROR: ${data.data.message}`, 'system');
+                this.addError(data.data.message);
                 this.isProcessing = false;
-                this.currentAiLine = null;
-                this.input.disabled = false;
-                this.input.focus();
+                this.currentAiWrap = null;
+                this.currentAiText = null;
+                this._setInputEnabled(true);
                 this.animationManager.stopTalking();
                 break;
 
             case 'history_cleared':
-                this.output.innerHTML = '<div class="line system">&gt; SYSTEM: History cleared</div>';
+                this.output.innerHTML = '';
+                this.addSystem('History cleared');
                 break;
 
-            case 'status':
-                console.log('Status:', data.data.message);
+            case 'status': {
+                const msg = data.data?.message || '';
+                this._setStatus(msg, null);
+                console.log('Status:', msg);
                 break;
+            }
 
             default:
                 console.log('Unknown message type:', data.type);
@@ -109,21 +120,32 @@ export class ChatManager {
 
     // イベントリスナー初期化
     initEventListeners() {
-        this.input.addEventListener('keypress', async (e) => {
-            if (e.key === 'Enter' && this.input.value.trim() && !this.isProcessing) {
+        this.input.addEventListener('keydown', async (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
                 const message = this.input.value.trim();
-                this.input.value = '';
-                await this.sendMessage(message);
+                if (!message) return;
+                if (message === '/clear') {
+                    this.input.value = '';
+                    this.sendCommand('clear_history');
+                    return;
+                }
+                if (!this.isProcessing) {
+                    this.input.value = '';
+                    await this.sendMessage(message);
+                }
             }
         });
 
-        // /clear コマンド
-        this.input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && this.input.value.trim() === '/clear') {
-                e.preventDefault();
-                this.input.value = '';
-                this.sendCommand('clear_history');
-            }
+        this.btnSend.addEventListener('click', async () => {
+            const message = this.input.value.trim();
+            if (!message || this.isProcessing) return;
+            this.input.value = '';
+            await this.sendMessage(message);
+        });
+
+        this.btnClear.addEventListener('click', () => {
+            this.sendCommand('clear_history');
         });
     }
 
@@ -132,12 +154,9 @@ export class ChatManager {
         if (this.isProcessing || this.ws.readyState !== WebSocket.OPEN) return;
 
         this.isProcessing = true;
-        this.input.disabled = true;
-
-        // アバターを話している状態に
+        this._setInputEnabled(false);
         this.animationManager.startTalking();
 
-        // WebSocketで送信
         this.ws.send(JSON.stringify({
             type: 'chat',
             data: { message }
@@ -147,26 +166,85 @@ export class ChatManager {
     // コマンド送信
     sendCommand(command) {
         if (this.ws.readyState !== WebSocket.OPEN) return;
-
-        this.ws.send(JSON.stringify({
-            type: command,
-            data: null
-        }));
+        this.ws.send(JSON.stringify({ type: command, data: null }));
     }
 
-    // AIレスポンス行を開始
-    startAiLine() {
-        const line = document.createElement('div');
-        line.className = 'line ai';
-        line.innerHTML = `<span class="ai-prompt">${this.settings.avatarName}&gt;</span> <span class="ai-text"></span>`;
-        this.output.appendChild(line);
-        this.currentAiLine = line.querySelector('.ai-text');
+    // ===== UI ヘルパー =====
+
+    _setInputEnabled(enabled) {
+        this.input.disabled = !enabled;
+        this.btnSend.disabled = !enabled;
+        if (enabled) this.input.focus();
+    }
+
+    // ステータスパネルを更新
+    // state: 'connected' | 'disconnected' | null (neutral)
+    _setStatus(text, state) {
+        if (this.statusText) this.statusText.textContent = text;
+        if (this.statusPanel) {
+            this.statusPanel.classList.remove('connected', 'disconnected');
+            if (state) this.statusPanel.classList.add(state);
+        }
+    }
+
+    addSystem(text) {
+        const el = document.createElement('div');
+        el.className = 'msg-system';
+        el.textContent = text;
+        this.output.appendChild(el);
         this.scrollToBottom();
     }
 
-    // AI行にテキストを追加
+    addUser(text) {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg-user-wrap';
+
+        const label = document.createElement('div');
+        label.className = 'msg-user-label';
+        label.textContent = this.settings.companionName || 'User';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-user';
+        bubble.textContent = text;
+
+        wrap.appendChild(label);
+        wrap.appendChild(bubble);
+        this.output.appendChild(wrap);
+        this.scrollToBottom();
+    }
+
+    // AIアクションを開始（タイプライター対応）
+    startAiLine() {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg-action-wrap';
+
+        const label = document.createElement('div');
+        label.className = 'msg-action-label';
+        label.textContent = 'Action';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-action';
+
+        const icon = document.createElement('span');
+        icon.className = 'action-icon';
+        icon.textContent = '💬';
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'ai-text';
+
+        bubble.appendChild(icon);
+        bubble.appendChild(textSpan);
+        wrap.appendChild(label);
+        wrap.appendChild(bubble);
+        this.output.appendChild(wrap);
+
+        this.currentAiWrap = wrap;
+        this.currentAiText = textSpan;
+        this.scrollToBottom();
+    }
+
     appendToAiLine(text) {
-        if (!this.currentAiLine) return;
+        if (!this.currentAiText) return;
         for (const char of text) {
             this.displayQueue.push(char);
         }
@@ -175,15 +253,14 @@ export class ChatManager {
         }
     }
 
-    // キューから1文字ずつ表示
     async _drainDisplayQueue() {
         this.isDraining = true;
         while (this.displayQueue.length > 0) {
             const backlog = this.displayQueue.length;
             const delay = backlog > 30 ? 0 : backlog > 15 ? 8 : this.charDelay;
             const char = this.displayQueue.shift();
-            if (this.currentAiLine) {
-                this.currentAiLine.textContent += char;
+            if (this.currentAiText) {
+                this.currentAiText.textContent += char;
                 this.scrollToBottom();
             }
             if (delay > 0) await this._sleep(delay);
@@ -191,57 +268,49 @@ export class ChatManager {
         this.isDraining = false;
     }
 
-    // 残りキューをすべて即時フラッシュ
     _flushDisplayQueue() {
         while (this.displayQueue.length > 0) {
             const char = this.displayQueue.shift();
-            if (this.currentAiLine) {
-                this.currentAiLine.textContent += char;
+            if (this.currentAiText) {
+                this.currentAiText.textContent += char;
             }
         }
         this.isDraining = false;
         this.scrollToBottom();
     }
 
-    _sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
+    // ツール実行アクションを表示（text_chunk以外のアクション通知）
+    addAction(data) {
+        const wrap = document.createElement('div');
+        wrap.className = 'msg-action-wrap';
 
-    // アクション表示行を追加
-    addActionLine(data) {
-        const line = document.createElement('div');
-        line.className = 'line action';
-        line.style.color = '#888';
-        line.style.fontStyle = 'italic';
-        line.innerHTML = `<span class="action-icon">${data.icon || '⚙️'}</span> ${data.label || data.name}`;
-        this.output.appendChild(line);
+        const label = document.createElement('div');
+        label.className = 'msg-action-label';
+        label.textContent = 'Action';
+
+        const bubble = document.createElement('div');
+        bubble.className = 'msg-action';
+        bubble.innerHTML = `<span class="action-icon">${data.icon || '⚙'}</span>${data.label || data.name || ''}`;
+
+        wrap.appendChild(label);
+        wrap.appendChild(bubble);
+        this.output.appendChild(wrap);
         this.scrollToBottom();
     }
 
-    // メッセージを画面に追加
-    async addLine(text, type) {
-        const line = document.createElement('div');
-        line.className = 'line ' + type;
-
-        if (type === 'user') {
-            line.innerHTML = `<span class="user-prompt">${this.settings.companionName || 'USER'}&gt;</span> ${text}`;
-            this.output.appendChild(line);
-            this.scrollToBottom();
-        } else if (type === 'ai') {
-            // AIメッセージ（完全版を表示）
-            line.innerHTML = `<span class="ai-prompt">${this.settings.avatarName}&gt;</span> <span class="ai-text">${text}</span>`;
-            this.output.appendChild(line);
-            this.scrollToBottom();
-        } else {
-            // system メッセージなど
-            line.textContent = text;
-            this.output.appendChild(line);
-            this.scrollToBottom();
-        }
+    addError(message) {
+        const el = document.createElement('div');
+        el.className = 'msg-error';
+        el.textContent = `ERROR: ${message}`;
+        this.output.appendChild(el);
+        this.scrollToBottom();
     }
 
-    // チャットエリアを最下部にスクロール
     scrollToBottom() {
         this.output.scrollTop = this.output.scrollHeight;
+    }
+
+    _sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
     }
 }

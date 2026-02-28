@@ -1,4 +1,3 @@
-<!-- AIチャットインターフェース：ターミナル風UIでAIアシスタントと対話 -->
 <!DOCTYPE html>
 <html lang="ja">
 <head>
@@ -8,36 +7,31 @@
     <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
-    <!-- ターミナル風UI -->
-    <div class="terminal">
-        <div class="chat-area">
-            <div class="chat-container">
-                <!-- チャット出力エリア -->
-                <div class="output" id="output">
-                    <div class="line system">&gt; SYSTEM: {{ avatar_full_name }} Online</div>
-                </div>
-                
-                <!-- アバター表示エリア -->
-                <div class="avatar-area">
-                    <img id="avatar-img" src="/static/character-images/open_close.png" alt="{{ avatar_name_upper }}">
-                    <div class="avatar-label">{{ avatar_name_upper }}</div>
-                </div>
+    <div class="app">
+        <div class="main">
+            <div class="chat-panel">
+                <div class="messages" id="output"></div>
             </div>
-            
-            <!-- 入力エリア -->
-            <div class="input-line">
-                <span class="prompt">&gt;</span>
+            <div class="input-row">
                 <input type="text" id="input" autofocus>
+                <button id="btn-send">Send</button>
+                <button id="btn-clear">Clear</button>
+            </div>
+        </div>
+
+        <div class="side-panel">
+            <div class="avatar-box">
+                <img id="avatar-img" src="/static/character-images/open_close.png" alt="{{ avatar_name_upper }}">
+            </div>
+            <div class="status-panel" id="status-panel">
+                <span id="status-text">Waiting for server connection...</span>
             </div>
         </div>
     </div>
 
     <script>
-        // 設定値をJavaScript変数に格納
         const appConfig = {{ app_config_json }};
     </script>
-    
-    <!-- モジュールを読み込み（WebSocket版） -->
     <script type="module" src="/static/js/app.js"></script>
 </body>
 </html>

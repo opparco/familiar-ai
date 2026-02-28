@@ -14,7 +14,7 @@ low-latency streaming. It also adds **VOICEVOX** as a local TTS alternative to E
 | Area | Change |
 |------|--------|
 | Web server | **New** — aiohttp + WebSocket server (`aio_server.py`, `--web` flag) |
-| Web UI | **New** — browser client with typewriter effect; UI design based on [avatar-ui-core](https://github.com/sito-sikino/avatar-ui-core) |
+| Web UI | **New** — browser client with typewriter effect |
 | CLI client | **New** — `familiar-client` command, terminal interface to the WebSocket server |
 | Desire loop | **New** — server runs a background agent loop; fires autonomous desire turns when idle |
 | Interrupt support | **New** — user messages interrupt an in-progress agent turn mid-loop |
@@ -35,7 +35,6 @@ uv run familiar --web        # WebSocket server on :5000  ← new default web mo
 
 Open `http://localhost:5000` — the bundled web UI connects via WebSocket automatically.
 
-The UI design is based on [avatar-ui-core](https://github.com/sito-sikino/avatar-ui-core) by sito-sikino.
 
 ### Terminal CLI client
 
