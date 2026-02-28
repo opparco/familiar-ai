@@ -163,11 +163,11 @@ def run_multilingual_demo(model_name: str, encode_queries) -> None:
         for j in range(n):
             sims[i][j] = cosine_similarity(embeddings[i], embeddings[j])
 
-    header = "        " + "".join(f"  [{i}]" for i in range(n))
+    header = "      " + "  ".join(f"  [{i}]" for i in range(n))
     print(header)
     for i, row in enumerate(sims):
         row_str = "  ".join(f"{v:.3f}" for v in row)
-        print(f"  [{i}]  {row_str}")
+        print(f"  [{i}] {row_str}")
     print()
     for i, s in enumerate(sentences):
         print(f"  [{i}] {s}")
@@ -182,8 +182,8 @@ def main() -> None:
     ruri = RuriV3Model()
 
     models = [
-        (e5.MODEL_NAME,   e5.encode_documents,   e5.encode_queries),
-        (ruri.MODEL_NAME, ruri.encode_documents,  ruri.encode_queries),
+        (e5.MODEL_NAME, e5.encode_documents, e5.encode_queries),
+        (ruri.MODEL_NAME, ruri.encode_documents, ruri.encode_queries),
     ]
 
     for name, enc_docs, enc_queries in models:
