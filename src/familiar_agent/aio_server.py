@@ -102,19 +102,17 @@ class FamiliarServer:
             html = (TEMPLATES_DIR / "index.html").read_text(encoding="utf-8")
 
             # Values for plain HTML parts
-            avatar_full_name = self.agent.config.agent_name
-            avatar_name_upper = avatar_full_name.upper()
+            agent_name = self.agent.config.agent_name
 
             # Values for JavaScript config object
             app_config = {
                 "typewriterDelay": 30,
-                "avatarName": self.agent.config.agent_name,
+                "agentName": self.agent.config.agent_name,
                 "companionName": self.agent.config.companion_name or "USER",
             }
 
             # Simple placeholder substitution
-            html = html.replace("{{ avatar_full_name }}", avatar_full_name)
-            html = html.replace("{{ avatar_name_upper }}", avatar_name_upper)
+            html = html.replace("{{ agent_name }}", agent_name)
             html = html.replace("{{ app_config_json }}", json.dumps(app_config))
 
             return web.Response(text=html, content_type="text/html")

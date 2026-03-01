@@ -60,7 +60,7 @@ export class ChatManager {
     handleMessage(data) {
         switch (data.type) {
             case 'connected': {
-                const agentName = data.data?.agent_name || data.data?.agentName || this.settings.avatarName || 'Agent';
+                const agentName = data.data?.agent_name || this.settings.agentName || 'Agent';
                 this._setStatus(`Connected: ${agentName}`, 'connected');
                 this.addSystem(`Connected to ${agentName}`);
                 break;
