@@ -55,9 +55,9 @@ def direction_delta(direction: str, degrees: int) -> tuple[float, float]:
     elif direction == "right":
         pan_delta = -degrees / 180.0
     elif direction == "up":
-        tilt_delta = -degrees / 90.0
-    elif direction == "down":
         tilt_delta = degrees / 90.0
+    elif direction == "down":
+        tilt_delta = -degrees / 90.0
     return pan_delta, tilt_delta
 
 
