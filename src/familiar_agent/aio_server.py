@@ -20,7 +20,6 @@ logger = logging.getLogger(__name__)
 
 # Static files directory
 STATIC_DIR = Path(__file__).parent / "static"
-TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 IDLE_CHECK_INTERVAL = 10.0  # seconds between desire checks when idle
 DESIRE_COOLDOWN = 90.0  # seconds after last user interaction before desires can fire
@@ -94,31 +93,22 @@ class FamiliarServer:
 
         # Routes
         self.app.router.add_get("/", self.index_handler)
+        self.app.router.add_get("/config.js", self.config_js_handler)
         self.app.router.add_get("/ws", self.websocket_handler)
 
-    async def index_handler(self, request: web.Request) -> web.Response:
+    async def index_handler(self, request: web.Request) -> web.FileResponse:
         """Serve the main HTML page."""
-        try:
-            html = (TEMPLATES_DIR / "index.html").read_text(encoding="utf-8")
+        return web.FileResponse(STATIC_DIR / "index.html")
 
-            # Values for plain HTML parts
-            agent_name = self.agent.config.agent_name
-
-            # Values for JavaScript config object
-            app_config = {
-                "typewriterDelay": 30,
-                "agentName": self.agent.config.agent_name,
-                "companionName": self.agent.config.companion_name or "USER",
-            }
-
-            # Simple placeholder substitution
-            html = html.replace("{{ agent_name }}", agent_name)
-            html = html.replace("{{ app_config_json }}", json.dumps(app_config))
-
-            return web.Response(text=html, content_type="text/html")
-        except Exception as e:
-            logger.error(f"Error serving index: {e}")
-            return web.Response(text=f"Error: {e}", status=500)
+    async def config_js_handler(self, request: web.Request) -> web.Response:
+        """Serve app config as a JS file."""
+        config = {
+            "typewriterDelay": 30,
+            "agentName": self.agent.config.agent_name,
+            "companionName": self.agent.config.companion_name or "USER",
+        }
+        js = f"const appConfig = {json.dumps(config)};"
+        return web.Response(text=js, content_type="application/javascript")
 
     async def websocket_handler(self, request: web.Request) -> web.WebSocketResponse:
         """Handle WebSocket connections."""

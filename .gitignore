@@ -14,4 +14,4 @@ __pycache__/
 ~/.familiar_ai/
 
 # External projects
-external/
+dotnet/

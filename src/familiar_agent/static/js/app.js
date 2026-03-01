@@ -10,6 +10,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // 設定の初期化
     const settings = createSettings(appConfig);
 
+    // エージェント名をDOMに反映
+    document.title = appConfig.agentName;
+    const avatarImg = document.getElementById('avatar-img');
+    if (avatarImg) avatarImg.alt = appConfig.agentName;
+
     // アニメーションマネージャーの初期化
     const animationManager = new AnimationManager(settings);
     
