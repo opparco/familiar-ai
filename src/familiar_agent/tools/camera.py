@@ -126,7 +126,7 @@ class CameraTool:
             return "Camera not available."
         try:
             # Normalize to ONVIF range (-1.0 to +1.0)
-            # Tapo C220: positive x = physical LEFT, positive y = physical DOWN
+            # Tapo C220: positive x = physical LEFT, positive y = physical UP
             pan_delta = 0.0
             tilt_delta = 0.0
 
@@ -135,9 +135,9 @@ class CameraTool:
             elif direction == "right":
                 pan_delta = -degrees / 180.0
             elif direction == "up":
-                tilt_delta = -degrees / 90.0
-            elif direction == "down":
                 tilt_delta = degrees / 90.0
+            elif direction == "down":
+                tilt_delta = -degrees / 90.0
 
             await self._ptz.RelativeMove(
                 {
