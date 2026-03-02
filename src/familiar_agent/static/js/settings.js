@@ -16,12 +16,4 @@ export const createSettings = (config) => ({
         const mouth = mouthOpen ? 'open' : 'close';
         return `/static/character-images/${eyes}_${mouth}.png`;
     },
-    
-    /**
-     * デフォルト（アイドル）状態の画像パス
-     * @returns {string} 画像パス
-     */
-    getIdleImagePath: () => {
-        return `/static/character-images/open_close.png`;
-    }
 });
